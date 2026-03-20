@@ -8,9 +8,38 @@
 ################################################################################
 # Pre-built binary stage (for CI builds)
 ################################################################################
-FROM gcr.io/distroless/cc-debian12:nonroot AS prebuilt
+# Build arguments
+ARG RUST_VERSION=1.88
+ARG DEBIAN_VARIANT=slim-bookworm
 
-COPY zentinel-waf-agent /zentinel-waf-agent
+################################################################################
+# Build stage - compiles the Rust binary with optimizations
+################################################################################
+FROM rust:${RUST_VERSION}-${DEBIAN_VARIANT} AS builder
+
+# Install build dependencies (only what's needed for compilation)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        pkg-config \
+        libssl-dev \
+        protobuf-compiler \
+        cmake \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy manifest files first for better layer caching
+COPY Cargo.toml ./
+COPY src/ src/
+COPY benches/ benches/
+COPY crates/ crates/
+# Build dependencies only (this layer is cached)
+RUN cargo build --release
+
+FROM gcr.io/distroless/cc-debian12:nonroot
+
+COPY --from=builder /app/target/release/zentinel-waf-agent /zentinel-waf-agent
 
 LABEL org.opencontainers.image.title="Zentinel WAF Agent" \
       org.opencontainers.image.description="Zentinel WAF Agent for Zentinel reverse proxy" \

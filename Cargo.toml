@@ -23,8 +23,8 @@ path = "src/main.rs"
 
 [dependencies]
 # Zentinel protocol
-zentinel-agent-protocol = { path = "../zentinel/crates/agent-protocol" }
-zentinel-common = { path = "../zentinel/crates/common" }
+zentinel-agent-protocol = { path = "crates/agent-protocol" }
+zentinel-common = { path = "crates/common" }
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }
