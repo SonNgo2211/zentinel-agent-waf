@@ -102,6 +102,10 @@ struct Args {
     #[arg(long, default_value = "65536", env = "WAF_WEBSOCKET_MAX_FRAME_SIZE")]
     websocket_max_frame_size: usize,
 
+    /// Path to local configuration cache file
+    #[arg(long, env = "WAF_CACHE_FILE")]
+    pub cache_file: Option<PathBuf>,
+
     /// Enable verbose logging
     #[arg(short, long, env = "WAF_VERBOSE")]
     verbose: bool,
@@ -310,10 +314,14 @@ async fn main() -> Result<()> {
     );
 
     // Create agent with error context
-    let agent = WafAgent::new(config).map_err(|e| {
-        error!(error = %e, "Failed to initialize WAF agent");
-        e
-    })?;
+    let agent = if let Some(cache_path) = args.cache_file {
+        WafAgent::with_cache(config, cache_path)
+    } else {
+        WafAgent::new(config).map_err(|e| {
+            error!(error = %e, "Failed to initialize WAF agent");
+            e
+        })?
+    };
 
     info!("WAF agent initialized successfully");
 

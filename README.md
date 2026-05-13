@@ -34,6 +34,12 @@ A next-generation Web Application Firewall agent for [Zentinel](https://github.c
 - **Streaming Inspection** - Constant memory body inspection with sliding window
 - **Plugin Traits** - Compile-time extensible detection and scoring
 
+### AI-Driven Intelligence
+- **Entropy Analysis** - Real-time detection of obfuscated and encrypted payloads.
+- **Tiny ONNX Engine** - High-speed execution of compressed machine learning models (O(1) inference).
+- **Active Learning** - Dynamic pattern weight updates pushed from the Control Plane without restarts.
+- **Hybrid Guardrail** - Tight integration with the Zentinel AI Auditor for deep semantic verification.
+
 ## Installation
 
 ### Using Bundle (Recommended)

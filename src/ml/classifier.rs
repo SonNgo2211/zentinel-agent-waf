@@ -34,6 +34,8 @@ pub struct ClassifierConfig {
     pub presence_weight: f32,
     /// Enable adaptive learning from detections
     pub adaptive_learning: bool,
+    /// Path to the tiny ONNX model
+    pub model_path: Option<String>,
 }
 
 impl Default for ClassifierConfig {
@@ -43,6 +45,7 @@ impl Default for ClassifierConfig {
             frequency_weight: 0.6,
             presence_weight: 0.4,
             adaptive_learning: false,
+            model_path: None,
         }
     }
 }
@@ -58,6 +61,10 @@ pub struct AttackPrediction {
     pub cmd_injection_score: f32,
     /// Path traversal confidence (0.0 - 1.0)
     pub path_traversal_score: f32,
+    /// Entropy score (0.0 - 1.0)
+    pub entropy_score: f32,
+    /// Tiny ONNX model score (0.0 - 1.0)
+    pub onnx_score: f32,
     /// Overall attack confidence (max of above)
     pub confidence: f32,
     /// Most likely attack type
@@ -74,6 +81,8 @@ impl AttackPrediction {
             xss_score: 0.0,
             cmd_injection_score: 0.0,
             path_traversal_score: 0.0,
+            entropy_score: 0.0,
+            onnx_score: 0.0,
             confidence: 0.0,
             predicted_type: None,
             contributing_patterns: Vec::new(),
@@ -101,6 +110,8 @@ pub struct AttackClassifier {
     tokenizer: CharNGramTokenizer,
     /// Per-attack-type pattern statistics
     patterns: HashMap<AttackType, AttackPatternStats>,
+    /// Optional tiny ONNX model for fast-path inference
+    tiny_model: Option<super::onnx::TinyModel>,
 }
 
 impl AttackClassifier {
@@ -110,6 +121,7 @@ impl AttackClassifier {
             config: ClassifierConfig::default(),
             tokenizer: CharNGramTokenizer::new(),
             patterns: HashMap::new(),
+            tiny_model: None,
         };
 
         // Initialize with known attack patterns
@@ -119,13 +131,42 @@ impl AttackClassifier {
 
     /// Create a classifier with custom config
     pub fn with_config(config: ClassifierConfig) -> Self {
+        let tiny_model = config
+            .model_path
+            .as_ref()
+            .and_then(|path| super::onnx::TinyModel::load(path).ok());
+
         let mut classifier = Self {
             config,
             tokenizer: CharNGramTokenizer::new(),
             patterns: HashMap::new(),
+            tiny_model,
         };
         classifier.initialize_patterns();
         classifier
+    }
+
+    /// Update patterns based on active learning feedback
+    pub fn update_patterns(&mut self, adaptive_patterns: &HashMap<String, HashMap<String, f32>>) {
+        for (attack_type_str, updates) in adaptive_patterns {
+            let attack_type = match attack_type_str.as_str() {
+                "sqli" => AttackType::SqlInjection,
+                "xss" => AttackType::Xss,
+                "command_injection" => AttackType::CommandInjection,
+                "path_traversal" => AttackType::PathTraversal,
+                _ => continue,
+            };
+
+            if let Some(stats) = self.patterns.get_mut(&attack_type) {
+                for (pattern, weight) in updates {
+                    let features = self.tokenizer.extract(pattern);
+                    for (hash, _count) in features.features {
+                        stats.malicious_ngrams.insert(hash, *weight);
+                    }
+                }
+                debug!(attack_type = ?attack_type, count = updates.len(), "Updated AI patterns for active learning");
+            }
+        }
     }
 
     /// Initialize with known attack patterns
@@ -352,6 +393,18 @@ impl AttackClassifier {
         let xss_score = self.score_attack_type(&features, AttackType::Xss);
         let cmd_injection_score = self.score_attack_type(&features, AttackType::CommandInjection);
         let path_traversal_score = self.score_attack_type(&features, AttackType::PathTraversal);
+        let entropy_score = super::entropy::normalized_entropy(input);
+
+        let onnx_score = if let Some(ref model) = self.tiny_model {
+            // Simplified feature extraction for demo: use first 128 n-gram counts
+            let mut features_vec = vec![0.0; 128];
+            for (i, (_hash, count)) in features.features.iter().take(128).enumerate() {
+                features_vec[i] = *count as f32;
+            }
+            model.predict(&features_vec).unwrap_or(0.0)
+        } else {
+            0.0
+        };
 
         // Find max score
         let scores = [
@@ -359,6 +412,7 @@ impl AttackClassifier {
             (xss_score, AttackType::Xss),
             (cmd_injection_score, AttackType::CommandInjection),
             (path_traversal_score, AttackType::PathTraversal),
+            (onnx_score, AttackType::ProtocolAttack), // Use ProtocolAttack for ONNX results for now
         ];
 
         let (confidence, predicted_type) = scores
@@ -381,6 +435,8 @@ impl AttackClassifier {
             xss_score,
             cmd_injection_score,
             path_traversal_score,
+            entropy_score,
+            onnx_score,
             confidence,
             predicted_type,
             contributing_patterns,

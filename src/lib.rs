@@ -191,6 +191,8 @@ pub struct WafAgent {
     pending_websocket_messages: Arc<RwLock<HashMap<WebSocketKey, WebSocketMessageAccumulator>>>,
     /// Metrics counters for v2 protocol reporting
     metrics: Arc<WafMetrics>,
+    /// Path to local configuration cache
+    cache_path: Option<std::path::PathBuf>,
 }
 
 impl WafAgent {
@@ -203,7 +205,31 @@ impl WafAgent {
             pending_response_bodies: Arc::new(RwLock::new(HashMap::new())),
             pending_websocket_messages: Arc::new(RwLock::new(HashMap::new())),
             metrics: Arc::new(WafMetrics::default()),
+            cache_path: None,
         })
+    }
+
+    /// Create a new WAF agent with a cache path
+    pub fn with_cache(mut config: WafConfig, cache_path: std::path::PathBuf) -> Self {
+        // Try to load from cache if it exists
+        if cache_path.exists() {
+            if let Ok(cache_data) = std::fs::read_to_string(&cache_path) {
+                if let Ok(json_config) = serde_json::from_str::<WafConfigJson>(&cache_data) {
+                    info!(path = ?cache_path, "Loaded WAF configuration from local cache");
+                    config = json_config.into();
+                }
+            }
+        }
+
+        let engine = WafEngine::new(config).expect("Failed to initialize WAF engine");
+        Self {
+            engine: Arc::new(RwLock::new(engine)),
+            pending_request_bodies: Arc::new(RwLock::new(HashMap::new())),
+            pending_response_bodies: Arc::new(RwLock::new(HashMap::new())),
+            pending_websocket_messages: Arc::new(RwLock::new(HashMap::new())),
+            metrics: Arc::new(WafMetrics::default()),
+            cache_path: Some(cache_path),
+        }
     }
 
     /// Reconfigure the WAF engine with new settings
@@ -353,6 +379,7 @@ impl WafAgent {
                     .with_audit(AuditMetadata {
                         tags: [tags, vec!["detected".to_string()]].concat(),
                         rule_ids,
+                        confidence: detections.iter().filter_map(|d| d.ai_score).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
                         ..Default::default()
                     })
             }
@@ -380,6 +407,7 @@ impl WafAgent {
                     .with_audit(AuditMetadata {
                         tags: [tags, vec!["blocked".to_string()]].concat(),
                         rule_ids,
+                        confidence: detections.iter().filter_map(|d| d.ai_score).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
                         ..Default::default()
                     })
             }
@@ -519,6 +547,18 @@ impl AgentHandlerV2 for WafAgent {
         match self.reconfigure(new_config).await {
             Ok(()) => {
                 info!("WAF agent reconfigured successfully");
+                
+                // Save to cache if enabled
+                if let Some(cache_path) = &self.cache_path {
+                    if let Ok(json_str) = serde_json::to_string_pretty(&json_config) {
+                        if let Err(e) = std::fs::write(cache_path, json_str) {
+                            warn!(error = %e, "Failed to save configuration to cache");
+                        } else {
+                            debug!(path = ?cache_path, "Saved configuration to local cache");
+                        }
+                    }
+                }
+                
                 true
             }
             Err(e) => {

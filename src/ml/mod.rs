@@ -20,11 +20,15 @@
 //! - `similarity`: Payload embedding and similarity scoring
 
 pub mod classifier;
+pub mod entropy;
 pub mod fingerprint;
 pub mod ngram;
+pub mod onnx;
 pub mod similarity;
 
 pub use classifier::{AttackClassifier, AttackPrediction, ClassifierConfig};
+pub use entropy::{calculate_entropy, normalized_entropy};
+pub use onnx::TinyModel;
 pub use fingerprint::{AnomalyResult, FingerprintBaseline, RequestFingerprint};
 pub use ngram::CharNGramTokenizer;
 pub use similarity::{PayloadSimilarity, SimilarityConfig};

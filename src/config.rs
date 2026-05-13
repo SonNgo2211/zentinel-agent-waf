@@ -636,6 +636,9 @@ pub struct MlConfig {
     /// Score contribution from ML detections (multiplier)
     #[serde(default = "default_ml_score_weight")]
     pub score_weight: f32,
+    /// Adaptive patterns for active learning (AttackType -> Pattern -> Weight)
+    #[serde(default)]
+    pub adaptive_patterns: HashMap<String, HashMap<String, f32>>,
 }
 
 impl Default for MlConfig {

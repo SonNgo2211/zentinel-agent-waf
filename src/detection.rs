@@ -24,6 +24,8 @@ pub struct Detection {
     pub base_score: u32,
     /// Tags from rule
     pub tags: Vec<String>,
+    /// Optional AI/ML confidence score (0.0 - 1.0)
+    pub ai_score: Option<f32>,
 }
 
 /// Score contribution from a single rule match

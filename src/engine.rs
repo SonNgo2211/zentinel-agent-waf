@@ -68,12 +68,17 @@ impl WafEngine {
         let automata = AutomataEngine::compile(&rules, config.paranoia_level)?;
 
         // Initialize ML components if enabled
-        let classifier = if config.ml.classifier_enabled {
+        let mut classifier = if config.ml.classifier_enabled {
             info!("ML attack classifier enabled");
             Some(AttackClassifier::new())
         } else {
             None
         };
+
+        // Apply active learning patterns
+        if let Some(ref mut c) = classifier {
+            c.update_patterns(&config.ml.adaptive_patterns);
+        }
 
         let similarity = if config.ml.similarity_enabled {
             info!("Payload similarity detection enabled");
@@ -220,6 +225,7 @@ impl WafEngine {
                         location: location.to_string(),
                         base_score,
                         tags: vec!["ml-classifier".to_string()],
+                        ai_score: Some(prediction.confidence),
                     });
                 }
             }
@@ -261,8 +267,25 @@ impl WafEngine {
                     location: location.to_string(),
                     base_score,
                     tags: vec!["ml-similarity".to_string()],
+                    ai_score: Some(result.max_similarity),
                 });
             }
+        }
+
+        // Entropy-based detection (detect obfuscation)
+        let entropy_score = super::entropy::normalized_entropy(value);
+        if entropy_score > 0.7 {
+            debug!(entropy = entropy_score, location = location, "High entropy detected");
+            detections.push(Detection {
+                rule_id: 99300,
+                rule_name: "ML-High-Entropy".to_string(),
+                attack_type: AttackType::ProtocolAttack,
+                matched_value: format!("entropy={:.2}", entropy_score),
+                location: location.to_string(),
+                base_score: (entropy_score * 5.0) as u32,
+                tags: vec!["ml-entropy".to_string()],
+                ai_score: Some(entropy_score),
+            });
         }
 
         detections
@@ -294,6 +317,7 @@ impl WafEngine {
                     location: location.to_string(),
                     base_score: metadata.base_score,
                     tags: metadata.tags.clone(),
+                    ai_score: None,
                 })
             })
             .collect()
@@ -324,6 +348,7 @@ impl WafEngine {
                     location: location.to_string(),
                     base_score: rule.base_score,
                     tags: rule.tags.clone(),
+                    ai_score: None,
                 });
             }
         }
@@ -457,6 +482,7 @@ impl WafEngine {
                     location: "request".to_string(),
                     base_score,
                     tags: vec!["ml-fingerprint".to_string()],
+                    ai_score: Some(result.score as f32),
                 });
             }
         }
